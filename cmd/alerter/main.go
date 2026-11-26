@@ -1,6 +1,8 @@
 // alerter: gửi cảnh báo Telegram (giai đoạn 5).
 //   - Tin: đọc news.enriched, báo tin liên quan có impact >= ALERT_MIN_IMPACT, kèm giá BTC/ETH hiện tại.
 //   - Giá: mỗi phút hỏi ClickHouse, báo khi giá đổi >= PRICE_MOVE_PCT trong PRICE_WINDOW, kèm tin ngay trước đó.
+//   - Sức khoẻ: mỗi phút kiểm tra giá, tin, gán nhãn và ClickHouse còn có dữ liệu mới; báo khi tắc và khi chạy lại.
+//   - Tóm tắt: mỗi ngày một lần sau DIGEST_AT (giờ địa phương).
 //
 // Chạy với network_mode: host (Kafka localhost:19092, ClickHouse 127.0.0.1:8123, Redis 127.0.0.1:6379).
 // Cấu hình qua env:
@@ -19,6 +21,7 @@
 //	PRICE_MOVE_PCT         mặc định 1.5
 //	PRICE_COOLDOWN         mặc định 1h
 //	ALERT_UTC_OFFSET       giờ hiển thị, mặc định 7 (giờ Việt Nam)
+//	DIGEST_AT              giờ gửi tóm tắt, mặc định 21:00; off = tắt
 package main
 
 import (
@@ -62,6 +65,7 @@ func main() {
 		PriceCooldown: envDuration("PRICE_COOLDOWN", time.Hour),
 		NewsLookback:  time.Hour,
 		Location:      time.FixedZone(fmt.Sprintf("UTC%+d", offset), offset*3600),
+		DigestAt:      digestAt(env("DIGEST_AT", "21:00")),
 	}
 
 	cons, err := consumer.New(logger, brokers, group, in)
@@ -109,6 +113,12 @@ func main() {
 			if err := svc.CheckPrices(ctx); err != nil && ctx.Err() == nil {
 				logger.Warn("check prices", "err", err)
 			}
+			if err := svc.CheckHealth(ctx); err != nil && ctx.Err() == nil {
+				logger.Warn("check health", "err", err)
+			}
+			if err := svc.MaybeSendDigest(ctx); err != nil && ctx.Err() == nil {
+				logger.Warn("digest", "err", err)
+			}
 		}
 	}
 }
@@ -139,6 +149,18 @@ func envDuration(key string, def time.Duration) time.Duration {
 		return v
 	}
 	return def
+}
+
+// digestAt đổi "HH:MM" thành khoảng cách từ 0h; "off" hoặc sai định dạng thì tắt (-1).
+func digestAt(s string) time.Duration {
+	t, err := time.Parse("15:04", s)
+	if err != nil {
+		if s != "off" {
+			slog.Warn("bad DIGEST_AT, digest disabled", "value", s)
+		}
+		return -1
+	}
+	return time.Duration(t.Hour())*time.Hour + time.Duration(t.Minute())*time.Minute
 }
 
 func splitList(s string) []string {

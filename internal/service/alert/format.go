@@ -14,6 +14,8 @@ import (
 
 const disclaimer = "<i>Chỉ là trùng thời gian, không phải nguyên nhân hay khuyến nghị đầu tư.</i>"
 
+func escape(s string) string { return html.EscapeString(s) }
+
 func formatNews(n domain.EnrichedNews, prices []clickhouse.PriceChange, loc *time.Location) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s <b>Tin ảnh hưởng %s</b> · %s\n", sentimentIcon(n.Sentiment), impactLabel(n.Impact), html.EscapeString(n.Category))

@@ -21,6 +21,11 @@ type impl struct {
 	mu        sync.Mutex
 	lastPrice map[string]time.Time // lần cuối báo giá của mỗi cặp (trong RAM: khởi động lại thì có thể báo lại 1 lần)
 	sentAt    []time.Time          // thời điểm các tin nhắn trong 1 giờ qua
+
+	chFails       int                  // số lần liên tiếp ClickHouse lỗi khi kiểm tra sức khoẻ
+	issues        map[string]time.Time // sự cố đang có -> lúc bắt đầu
+	issueNotified map[string]time.Time // lần cuối đã báo sự cố
+	digestSent    string               // key ngày đã gửi tóm tắt
 }
 
 func New(logger *slog.Logger, tg telegram.Gateway, ch clickhouse.Gateway, sent processed.Store, cfg Config) Service {
@@ -32,6 +37,9 @@ func New(logger *slog.Logger, tg telegram.Gateway, ch clickhouse.Gateway, sent p
 		cfg:       cfg.withDefaults(),
 		now:       time.Now,
 		lastPrice: map[string]time.Time{},
+
+		issues:        map[string]time.Time{},
+		issueNotified: map[string]time.Time{},
 	}
 }
 

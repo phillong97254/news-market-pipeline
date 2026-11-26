@@ -15,7 +15,8 @@ import (
 // query chạy SQL (đã có FORMAT JSONEachRow) và decode từng dòng vào hàm row.
 func (i *impl) query(ctx context.Context, sql string, params map[string]string, row func(dec *json.Decoder) error) error {
 	q := url.Values{}
-	q.Set("date_time_output_format", "iso") // 2026-11-26T07:35:00Z
+	q.Set("date_time_output_format", "iso")               // 2026-11-26T07:35:00Z
+	q.Set("output_format_json_quote_64bit_integers", "0") // count() là UInt64: trả số, không trả chuỗi
 	for k, v := range params {
 		q.Set("param_"+k, v)
 	}

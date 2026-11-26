@@ -9,6 +9,7 @@ GDELT + RSS ──► news-producer (Go) ──► Redpanda: news.raw           
 news.raw ──► nlp-worker (Go + Ollama qwen2.5:7b) ──► news.enriched             ← Giai đoạn 3 (xong)
 3 topic ──► ClickHouse (Kafka engine + materialized view) ──► Grafana            ← Giai đoạn 4 (xong)
 news.enriched + ClickHouse ──► alerter (Go) ──► Telegram                         ← Giai đoạn 5 (xong)
+Bluesky Jetstream ──► social-producer (Go) ──► Redpanda: social.mentions ──► ClickHouse   ← đếm bài theo chủ đề
 ```
 
 ## Chạy
@@ -147,29 +148,53 @@ docker exec -it clickhouse sh -c 'clickhouse-client -u pipeline --password "$CLI
 - Giờ hiển thị theo `ALERT_UTC_OFFSET` (7 = giờ Việt Nam).
 - Đọc ClickHouse bằng user chỉ đọc `grafana`.
 
+Ngoài 2 loại trên, alerter còn:
+- **Theo dõi pipeline** mỗi phút, báo ⚠️ khi: không có tick mới 5 phút; không có tin mới 45 phút; còn tin chờ mà nlp-worker
+  không gán nhãn gì 30 phút (hoặc tồn hơn 300 tin); ClickHouse lỗi 5 phút liền. Báo ✅ khi chạy lại, nhắc lại sau 6 giờ nếu
+  vẫn lỗi. Tin này không tính vào hạn mức mỗi giờ.
+- **Tóm tắt 24 giờ** lúc `DIGEST_AT` (21:00 giờ Việt Nam, `off` để tắt): giá đầu/cuối, cao/thấp của mỗi cặp; số tin, tin liên quan,
+  sentiment TB, loại tin nhiều nhất; 5 tin impact cao; số bài Bluesky theo chủ đề so với trung bình 7 ngày.
+  Ngày đã gửi nhớ trong Redis nên khởi động lại không gửi lại; quá 3 giờ sau giờ hẹn thì bỏ ngày đó.
+
 ```bash
 docker logs -f alerter     # news alert sent / price alert sent
 ```
+
+## Bluesky
+`social-producer` đọc Jetstream (luồng công khai mọi bài mới trên Bluesky, khoảng 2.000-4.000 bài/phút, không cần key),
+đếm bài chứa từ khoá của 11 chủ đề (tariff, fed, inflation, recession, sanctions, stocks, bitcoin, ethereum, crypto, gold, oil;
+có cả từ khoá tiếng Việt, khớp nguyên từ) và mỗi phút ghi 1 bản ghi cho mỗi chủ đề, cộng `_all` là tổng số bài.
+
+- **Không lưu nội dung, tác giả hay link bài**: chỉ có số đếm rời khỏi tiến trình.
+- Topic `social.mentions` (key = chủ đề, giữ 30 ngày) → bảng `market.social_mentions` (`ReplacingMergeTree(posts)`, giữ 1 năm).
+- Kết nối lại thì đọc tiếp từ cursor (thời điểm bài cuối). Khởi động lại tiến trình thì phút đang dở bị hụt một ít.
+- Dashboard có 2 biểu đồ: số bài mỗi giờ, và số bài trên 10.000 bài (bỏ ảnh hưởng giờ cao điểm).
+- Đếm theo từ khoá nên có nhiễu (ví dụ "gold" trong "gold medal" không tính vì cần "gold price", nhưng "crypto" đếm cả tin rác).
+  Dùng để xem xu hướng, không dùng con số tuyệt đối.
+- Đổi chủ đề: sửa `DefaultTopics` trong `internal/service/social/topics.go`.
 
 ## Cấu trúc
 ```
 cmd/price-producer/          giá coin
 cmd/news-producer/           tin tức: tạo poller cho GDELT và từng feed RSS
 cmd/nlp-worker/              gán nhãn tin bằng Ollama
-cmd/alerter/                 cảnh báo Telegram: tin impact cao, giá biến động mạnh
+cmd/alerter/                 Telegram: tin impact cao, giá biến động mạnh, pipeline tắc, tóm tắt hằng ngày
+cmd/social-producer/         đếm bài Bluesky theo chủ đề mỗi phút
 internal/domain/             Tick, NewsItem, NewsAnalysis/EnrichedNews, NewsID/CanonicalURL
 internal/gateway/coinbase/   WebSocket Coinbase, read timeout 30s
 internal/gateway/gdelt/      GDELT DOC 2.0 (artlist JSON)
 internal/gateway/rss/        RSS 2.0 + Atom, bỏ thẻ HTML, conditional GET
 internal/gateway/ollama/     /api/chat với JSON schema, chuẩn hoá nhãn
 internal/gateway/telegram/   sendMessage, lỗi không chứa token
-internal/gateway/clickhouse/ HTTP interface, query có tham số, đọc biến động giá và tin gần đây
+internal/gateway/clickhouse/ HTTP interface, query có tham số: biến động giá, tin gần đây, sức khoẻ, tóm tắt
+internal/gateway/jetstream/  WebSocket Jetstream của Bluesky, chỉ lấy bài mới
 internal/consumer/kafka/     consumer group, xử lý từng bản ghi, commit sau khi xong, thử lại có backoff
 internal/publisher/kafka/    franz-go, idempotent, gom lô 50ms, nén zstd, dùng chung mọi topic
 internal/service/ingest/     giá: tự kết nối lại, backoff 1s → 30s
 internal/service/news/       tin: poller song song, lọc trùng, bỏ bài quá cũ
 internal/service/enrich/     gán nhãn 1 tin, phân biệt lỗi tạm thời và lỗi vĩnh viễn
-internal/service/alert/      chọn tin/biến động cần báo, chống trùng và spam, soạn tin nhắn
+internal/service/alert/      chọn tin/biến động cần báo, theo dõi pipeline, tóm tắt, chống trùng và spam
+internal/service/social/     khớp từ khoá, đếm theo phút, kết nối lại theo cursor
 clickhouse/schema/           bảng, Kafka engine, materialized view, view phân tích
 clickhouse/config.d|users.d/ cấu hình RAM/log, user chỉ đọc cho Grafana
 grafana/                     datasource, dashboard (sinh bằng gen_dashboard.py)

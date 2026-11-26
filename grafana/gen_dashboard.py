@@ -235,6 +235,44 @@ LIMIT 200""",
     transformations=HIDE_URL,
 )
 
+# ── Hàng 6: Bluesky ──
+SOCIAL_FIELD = {"displayName": "${__field.labels.topic}",
+                "custom": {"lineWidth": 1, "fillOpacity": 0, "showPoints": "never"}}
+SOCIAL_OPTS = {"legend": {"showLegend": True, "displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi", "sort": "desc"}}
+panel(
+    "timeseries", "Bluesky: số bài nhắc tới chủ đề, mỗi giờ",
+    """SELECT toStartOfHour(minute) AS time, topic, sum(posts) AS posts
+FROM market.social_mentions FINAL
+WHERE topic != '_all' AND $__timeFilter(minute)
+GROUP BY time, topic
+ORDER BY time""",
+    0, 49, 12, 9, fmt=TIMESERIES,
+    desc="Đếm theo từ khoá trên toàn bộ bài công khai mới (Jetstream). Không lưu nội dung bài. 'eth', 'btc' khớp nguyên từ.",
+    field=SOCIAL_FIELD, options=SOCIAL_OPTS,
+)
+panel(
+    "timeseries", "Bluesky: số bài trên mỗi 10.000 bài, mỗi giờ",
+    """SELECT time, topic, posts * 10000 / nullIf(total, 0) AS per_10k
+FROM
+(
+    SELECT toStartOfHour(minute) AS time, topic, sum(posts) AS posts
+    FROM market.social_mentions FINAL
+    WHERE topic != '_all' AND $__timeFilter(minute)
+    GROUP BY time, topic
+) AS t
+INNER JOIN
+(
+    SELECT toStartOfHour(minute) AS time, sum(posts) AS total
+    FROM market.social_mentions FINAL
+    WHERE topic = '_all' AND $__timeFilter(minute)
+    GROUP BY time
+) AS a USING time
+ORDER BY time""",
+    12, 49, 12, 9, fmt=TIMESERIES,
+    desc="Chia cho tổng số bài để bỏ ảnh hưởng của giờ cao điểm/thấp điểm trên Bluesky.",
+    field={**SOCIAL_FIELD, "decimals": 1}, options=SOCIAL_OPTS,
+)
+
 dashboard = {
     "uid": "news-market",
     "title": "News x Market",

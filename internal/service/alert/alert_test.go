@@ -31,10 +31,28 @@ func (f *fakeTG) Send(_ context.Context, in telegram.SendInput) error {
 }
 
 type fakeCH struct {
-	changes []clickhouse.PriceChange
-	news    []clickhouse.NewsSummary
-	err     error
-	newsIn  clickhouse.RecentNewsInput
+	changes   []clickhouse.PriceChange
+	news      []clickhouse.NewsSummary
+	err       error
+	newsIn    clickhouse.RecentNewsInput
+	health    clickhouse.Health
+	healthErr error
+	ranges    []clickhouse.PriceRange
+	stats     clickhouse.NewsStats
+	social    []clickhouse.SocialTopic
+}
+
+func (f *fakeCH) PipelineHealth(context.Context) (clickhouse.Health, error) {
+	return f.health, f.healthErr
+}
+func (f *fakeCH) PriceSummary(context.Context, clickhouse.RangeInput) ([]clickhouse.PriceRange, error) {
+	return f.ranges, f.err
+}
+func (f *fakeCH) NewsStats(context.Context, clickhouse.RangeInput) (clickhouse.NewsStats, error) {
+	return f.stats, f.err
+}
+func (f *fakeCH) SocialTopics(context.Context, clickhouse.RangeInput) ([]clickhouse.SocialTopic, error) {
+	return f.social, f.err
 }
 
 func (f *fakeCH) PriceChanges(context.Context, clickhouse.PriceChangesInput) ([]clickhouse.PriceChange, error) {

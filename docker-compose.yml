@@ -50,6 +50,9 @@ services:
         rpk -X brokers=redpanda:9092 topic create news.enriched -p 3 -r 1 \
           -c retention.ms=7776000000 -c compression.type=producer \
           || true
+        rpk -X brokers=redpanda:9092 topic create social.mentions -p 3 -r 1 \
+          -c retention.ms=2592000000 -c compression.type=producer \
+          || true
         rpk -X brokers=redpanda:9092 topic list
     restart: "no"
     networks: [pipeline]
@@ -100,6 +103,22 @@ services:
       NEWS_TOPIC: news.raw
       GDELT_EVERY: 15m
       RSS_EVERY: 10m
+    networks: [pipeline]
+
+  # Đếm số bài Bluesky theo chủ đề mỗi phút (Jetstream công khai, không cần key). Không lưu nội dung bài.
+  social-producer:
+    build:
+      context: .
+      args:
+        APP: social-producer
+    container_name: social-producer
+    restart: unless-stopped
+    depends_on:
+      topics:
+        condition: service_completed_successfully
+    environment:
+      KAFKA_BROKERS: redpanda:9092
+      SOCIAL_TOPIC: social.mentions
     networks: [pipeline]
 
   # Dùng mạng của host để gọi Ollama ở 127.0.0.1:11434 (Ollama không mở ra ngoài) và Kafka ở localhost:19092.
@@ -232,6 +251,7 @@ services:
       PRICE_MOVE_PCT: "1.5"
       PRICE_COOLDOWN: 1h
       ALERT_UTC_OFFSET: "7"
+      DIGEST_AT: "21:00" # tóm tắt 24 giờ, giờ Việt Nam; "off" để tắt
     env_file:
       - path: ../infra/redis/.env # REDIS_PASSWORD
         required: false

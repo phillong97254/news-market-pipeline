@@ -17,6 +17,10 @@ type Service interface {
 	HandleNews(ctx context.Context, raw []byte) error
 	// CheckPrices so giá đầu và cuối cửa sổ, gửi cảnh báo nếu vượt ngưỡng. Gọi mỗi phút.
 	CheckPrices(ctx context.Context) error
+	// CheckHealth báo khi một tầng của pipeline ngừng có dữ liệu mới, và báo lại khi nó chạy lại. Gọi mỗi phút.
+	CheckHealth(ctx context.Context) error
+	// MaybeSendDigest gửi tóm tắt 24 giờ mỗi ngày một lần sau giờ DigestAt. Gọi mỗi phút.
+	MaybeSendDigest(ctx context.Context) error
 }
 
 type Config struct {
@@ -28,6 +32,7 @@ type Config struct {
 	NewsLookback  time.Duration // cảnh báo giá kèm tin trong khoảng này trước đó (mặc định 1h)
 	MaxPerHour    int           // tổng số tin nhắn tối đa mỗi giờ, chống spam (mặc định 10)
 	Location      *time.Location
+	DigestAt      time.Duration // giờ gửi tóm tắt tính từ 0h địa phương (mặc định 21h); âm = tắt
 }
 
 func (c Config) withDefaults() Config {
@@ -51,6 +56,9 @@ func (c Config) withDefaults() Config {
 	}
 	if c.MaxPerHour <= 0 {
 		c.MaxPerHour = 10
+	}
+	if c.DigestAt == 0 {
+		c.DigestAt = 21 * time.Hour
 	}
 	if c.Location == nil {
 		c.Location = time.UTC
