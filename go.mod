@@ -1,6 +1,6 @@
 module github.com/phillong97254/news-market-pipeline
 
-go 1.26.0
+go 1.27.0
 
 require (
 	github.com/coder/websocket v1.8.15

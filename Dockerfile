@@ -1,7 +1,7 @@
 # Build trên chính Oracle (arm64): không đặt GOARCH, Go tự lấy theo máy build.
 # Dùng chung cho mọi app trong cmd/: docker build --build-arg APP=price-producer .
-# Bản vá mới nhất của Go 1.26: govulncheck báo 25 lỗ hổng thư viện chuẩn (net/http, crypto/tls, x509...) ở 1.26.1.
-FROM golang:1.26.11-alpine AS build
+# Go 1.27.4 (bản vá mới nhất; 1.27.1 còn 10 lỗ hổng thư viện chuẩn). Trước đó ở 1.26.1 govulncheck báo 25 lỗ hổng thư viện chuẩn (net/http, crypto/tls, x509...).
+FROM golang:1.27.4-alpine AS build
 ARG APP
 WORKDIR /src
 COPY go.mod go.sum ./
