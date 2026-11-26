@@ -1,5 +1,5 @@
 # Redpanda (Kafka API) + Console + producer giá coin (giai đoạn 1) + producer tin tức (giai đoạn 2)
-# + NLP worker gán nhãn tin bằng Ollama (giai đoạn 3).
+# + NLP worker gán nhãn tin bằng Ollama (giai đoạn 3) + ClickHouse và Grafana (giai đoạn 4).
 # Mọi cổng chỉ mở trên 127.0.0.1 của Oracle; xem từ Kali qua SSH tunnel (README).
 name: news-market
 
@@ -127,8 +127,87 @@ services:
       - path: ../infra/redis/.env
         required: false
 
+  # Giai đoạn 4: ClickHouse tự đọc 3 topic bằng Kafka engine (không cần service Go riêng).
+  # Mật khẩu nằm trong .env trên Oracle (xem README), không có trong repo.
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.8.14.39
+    container_name: clickhouse
+    restart: unless-stopped
+    mem_limit: 3g
+    depends_on:
+      topics:
+        condition: service_completed_successfully
+    environment:
+      CLICKHOUSE_USER: pipeline
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?thiếu CLICKHOUSE_PASSWORD trong .env}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "0"
+      CH_GRAFANA_PASSWORD: ${CH_GRAFANA_PASSWORD:?thiếu CH_GRAFANA_PASSWORD trong .env}
+    ulimits:
+      nofile: { soft: 262144, hard: 262144 }
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+      - ./clickhouse/config.d/pipeline.xml:/etc/clickhouse-server/config.d/pipeline.xml:ro
+      - ./clickhouse/users.d/grafana.xml:/etc/clickhouse-server/users.d/grafana.xml:ro
+    ports:
+      - "127.0.0.1:8123:8123" # HTTP; cổng native 9000 đã bị auth-service dùng nên không mở
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8123/ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    networks: [pipeline]
+
+  # Áp schema rồi thoát; chạy lại không sao (IF NOT EXISTS / OR REPLACE).
+  clickhouse-schema:
+    image: clickhouse/clickhouse-server:24.8.14.39
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    environment:
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?thiếu CLICKHOUSE_PASSWORD trong .env}
+    volumes:
+      - ./clickhouse/schema:/schema:ro
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        set -e
+        for f in /schema/*.sql; do
+          echo "apply $$f"
+          clickhouse-client --host clickhouse --user pipeline --password "$$CLICKHOUSE_PASSWORD" --multiquery --queries-file "$$f"
+        done
+    restart: "no"
+    networks: [pipeline]
+
+  grafana:
+    image: grafana/grafana-oss:12.4.3
+    container_name: grafana
+    restart: unless-stopped
+    mem_limit: 512m
+    depends_on:
+      clickhouse-schema:
+        condition: service_completed_successfully
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GF_ADMIN_PASSWORD:?thiếu GF_ADMIN_PASSWORD trong .env}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_NEWS_NEWS_FEED_ENABLED: "false"
+      GF_PLUGINS_PREINSTALL_SYNC: grafana-clickhouse-datasource@4.23.5
+      CH_GRAFANA_PASSWORD: ${CH_GRAFANA_PASSWORD:?thiếu CH_GRAFANA_PASSWORD trong .env}
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "127.0.0.1:3000:3000"
+    networks: [pipeline]
+
 volumes:
   redpanda-data:
+  clickhouse-data:
+  grafana-data:
 
 networks:
   pipeline:

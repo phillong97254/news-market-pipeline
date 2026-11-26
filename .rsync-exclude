@@ -1,3 +1,5 @@
 .git/
 bin/
 *.log
+# Mật khẩu ClickHouse/Grafana chỉ nằm trên Oracle; không có dòng này thì rsync --delete sẽ xoá nó.
+.env

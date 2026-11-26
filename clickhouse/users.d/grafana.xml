@@ -1,0 +1,18 @@
+<!-- User chỉ đọc cho Grafana. Mật khẩu lấy từ biến môi trường (file .env trên Oracle), không nằm trong repo. -->
+<clickhouse>
+    <profiles>
+        <grafana_readonly>
+            <readonly>2</readonly> <!-- chỉ đọc, nhưng plugin Grafana được đặt setting cho từng query -->
+            <max_execution_time>30</max_execution_time>
+            <max_memory_usage>1000000000</max_memory_usage>
+        </grafana_readonly>
+    </profiles>
+    <users>
+        <grafana>
+            <password from_env="CH_GRAFANA_PASSWORD"/>
+            <networks><ip>::/0</ip></networks> <!-- ClickHouse chỉ lộ ra mạng docker và 127.0.0.1 -->
+            <profile>grafana_readonly</profile>
+            <quota>default</quota>
+        </grafana>
+    </users>
+</clickhouse>

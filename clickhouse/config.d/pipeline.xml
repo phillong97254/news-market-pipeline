@@ -1,0 +1,35 @@
+<!-- Cấu hình cho máy đơn, RAM giới hạn bởi mem_limit của container. -->
+<clickhouse>
+    <listen_host>0.0.0.0</listen_host> <!-- Oracle không có IPv6 trong container -->
+    <logger>
+        <level>warning</level>
+        <console>1</console>
+    </logger>
+    <max_server_memory_usage_to_ram_ratio>0.8</max_server_memory_usage_to_ram_ratio>
+    <mark_cache_size>268435456</mark_cache_size>
+    <uncompressed_cache_size>134217728</uncompressed_cache_size>
+
+    <!-- Consumer group mới của Kafka engine đọc từ đầu topic (nạp lại dữ liệu đã có trong Redpanda). -->
+    <kafka>
+        <auto_offset_reset>earliest</auto_offset_reset>
+    </kafka>
+
+    <!-- Bảng log hệ thống phình rất nhanh; chỉ giữ query_log 7 ngày để gỡ lỗi. -->
+    <query_log>
+        <database>system</database>
+        <table>query_log</table>
+        <ttl>event_date + INTERVAL 7 DAY DELETE</ttl>
+    </query_log>
+    <trace_log remove="1"/>
+    <metric_log remove="1"/>
+    <asynchronous_metric_log remove="1"/>
+    <part_log remove="1"/>
+    <processors_profile_log remove="1"/>
+    <query_thread_log remove="1"/>
+    <query_views_log remove="1"/>
+    <session_log remove="1"/>
+    <text_log remove="1"/>
+    <opentelemetry_span_log remove="1"/>
+    <latency_log remove="1"/>
+    <error_log remove="1"/>
+</clickhouse>

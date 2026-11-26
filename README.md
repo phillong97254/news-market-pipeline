@@ -7,7 +7,8 @@ Mục tiêu là phân tích tương quan, **không** phải dự đoán giá hay
 Coinbase WebSocket ──► price-producer (Go) ──► Redpanda: prices.tick            ← Giai đoạn 1 (xong)
 GDELT + RSS ──► news-producer (Go) ──► Redpanda: news.raw                       ← Giai đoạn 2 (xong)
 news.raw ──► nlp-worker (Go + Ollama qwen2.5:7b) ──► news.enriched             ← Giai đoạn 3 (xong)
-Redpanda ──► ClickHouse ──► Grafana / cảnh báo Telegram                         ← Giai đoạn 4-5
+3 topic ──► ClickHouse (Kafka engine + materialized view) ──► Grafana            ← Giai đoạn 4 (xong)
+ClickHouse ──► cảnh báo Telegram                                                ← Giai đoạn 5
 ```
 
 ## Chạy
@@ -17,10 +18,17 @@ Code nằm ở Kali, chạy trên Oracle (arm64, build tại chỗ):
 ./deploy.sh news-producer    # chỉ build lại 1 service
 ```
 
-Mọi cổng chỉ nghe trên `127.0.0.1` của Oracle. Xem Redpanda Console từ Kali:
+Lần đầu, tạo mật khẩu ClickHouse/Grafana trên Oracle (file `.env` không nằm trong repo, `deploy.sh` không ghi đè nó):
 ```bash
-ssh -N -L 8090:127.0.0.1:8090 oracle   # rồi mở http://localhost:8090
+ssh oracle 'cd ~/news-market-pipeline && umask 077 && printf "CLICKHOUSE_PASSWORD=%s\nCH_GRAFANA_PASSWORD=%s\nGF_ADMIN_PASSWORD=%s\n" $(openssl rand -hex 24) $(openssl rand -hex 24) $(openssl rand -hex 16) > .env'
 ```
+Tên biến xem ở `.env.example`.
+
+Mọi cổng chỉ nghe trên `127.0.0.1` của Oracle. Xem từ Kali qua SSH tunnel:
+```bash
+ssh -N -L 8090:127.0.0.1:8090 -L 3000:127.0.0.1:3000 oracle   # Console: http://localhost:8090, Grafana: http://localhost:3000
+```
+Đăng nhập Grafana bằng user `admin`, mật khẩu là `GF_ADMIN_PASSWORD` trong `.env` trên Oracle.
 
 Kiểm tra nhanh trên Oracle:
 ```bash
@@ -85,6 +93,40 @@ docker exec redpanda rpk group describe nlp-worker
 docker logs -f nlp-worker
 ```
 
+## ClickHouse và Grafana (giai đoạn 4)
+ClickHouse tự đọc 3 topic bằng bảng Kafka engine (`*_queue`, consumer group `clickhouse-*`); materialized view chuyển
+sang bảng lưu trữ. Không có service Go nào ở giữa. Schema ở `clickhouse/schema/`, service `clickhouse-schema` áp nó mỗi lần deploy
+(chạy lại không sao). Consumer group mới đọc từ đầu topic, nên bảng có lại mọi dữ liệu Redpanda còn giữ.
+
+| Bảng / view (database `market`) | Nội dung |
+|---|---|
+| `prices_tick` | mọi tick, giữ 90 ngày; `ReplacingMergeTree` theo `(symbol, event_time, trade_id)` |
+| `prices_1m` → view `candles_1m` | nến 1 phút (open/high/low/close/volume/trades), giữ 2 năm. Đọc qua `candles_1m` |
+| `news` | `news.raw`, mỗi `id` một dòng sau khi merge |
+| `news_enriched` | `news.enriched`, giữ bản `processed_at` mới nhất của mỗi `id` |
+| view `news_reaction` | mỗi tin liên quan (impact ≥ 1) × mỗi cặp: giá đóng cửa phút trước tin, lợi nhuận sau 15 phút / 1 giờ / 4 giờ |
+| `kafka_errors` | bản ghi JSON hỏng của mọi topic, giữ 7 ngày |
+
+- Kafka engine giao at-least-once và producer có thể gửi lại, nên bảng chính là `ReplacingMergeTree`: dòng trùng chỉ biến mất
+  khi merge chạy. Đếm thì dùng `FINAL` hoặc `uniqExact(id)`.
+- Nến 1 phút tính lúc ghi: tick trùng (hiếm) làm `volume`/`trades` lệch nhẹ, không ảnh hưởng giá.
+- Trong materialized view, cột nguồn viết `q.<cột>` vì alias trùng tên che mất cột gốc. Dashboard cũng tránh đặt alias trùng tên cột.
+- Đổi cột của bảng đã có thì `CREATE ... IF NOT EXISTS` không áp lại: cần `ALTER` hoặc xoá và tạo lại view/bảng.
+- RAM: ClickHouse khoảng 250MB (giới hạn 3GB), Grafana khoảng 120MB (giới hạn 512MB). Đĩa: khoảng 35MB cho mỗi 2 triệu tick.
+
+Grafana (plugin `grafana-clickhouse-datasource`, user ClickHouse chỉ đọc `grafana`) có sẵn dashboard **News x Market**:
+giá BTC/ETH có vạch đánh dấu tin impact ≥ 2, số tin theo loại, sentiment theo giờ, lợi nhuận trung bình sau tin theo sentiment
+và theo loại tin (so với lợi nhuận trung bình của mọi thời điểm), bảng từng tin. Dashboard sinh từ `grafana/gen_dashboard.py`:
+sửa file đó rồi chạy `python3 grafana/gen_dashboard.py && ./deploy.sh grafana`.
+
+Đây là tương quan theo thời gian trên ít mẫu và nhãn của model 7B, không chứng minh tin làm giá chạy, không phải khuyến nghị đầu tư.
+
+Truy vấn tay trên Oracle:
+```bash
+docker exec -it clickhouse sh -c 'clickhouse-client -u pipeline --password "$CLICKHOUSE_PASSWORD"'
+# SELECT * FROM market.news_reaction WHERE symbol = 'BTC-USD' ORDER BY published_at DESC LIMIT 10;
+```
+
 ## Cấu trúc
 ```
 cmd/price-producer/          giá coin
@@ -100,6 +142,9 @@ internal/publisher/kafka/    franz-go, idempotent, gom lô 50ms, nén zstd, dùn
 internal/service/ingest/     giá: tự kết nối lại, backoff 1s → 30s
 internal/service/news/       tin: poller song song, lọc trùng, bỏ bài quá cũ
 internal/service/enrich/     gán nhãn 1 tin, phân biệt lỗi tạm thời và lỗi vĩnh viễn
+clickhouse/schema/           bảng, Kafka engine, materialized view, view phân tích
+clickhouse/config.d|users.d/ cấu hình RAM/log, user chỉ đọc cho Grafana
+grafana/                     datasource, dashboard (sinh bằng gen_dashboard.py)
 ```
 
 ## Test
