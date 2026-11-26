@@ -8,7 +8,7 @@ Coinbase WebSocket ──► price-producer (Go) ──► Redpanda: prices.tick
 GDELT + RSS ──► news-producer (Go) ──► Redpanda: news.raw                       ← Giai đoạn 2 (xong)
 news.raw ──► nlp-worker (Go + Ollama qwen2.5:7b) ──► news.enriched             ← Giai đoạn 3 (xong)
 3 topic ──► ClickHouse (Kafka engine + materialized view) ──► Grafana            ← Giai đoạn 4 (xong)
-ClickHouse ──► cảnh báo Telegram                                                ← Giai đoạn 5
+news.enriched + ClickHouse ──► alerter (Go) ──► Telegram                         ← Giai đoạn 5 (xong)
 ```
 
 ## Chạy
@@ -38,7 +38,9 @@ docker logs -f news-producer                               # mỗi lần lấy: 
 ```
 
 ## Topic `prices.tick`
-- Key: symbol (`BTC-USD`, `ETH-USD`), nên mỗi cặp giữ đúng thứ tự trong 1 partition.
+- Key: symbol (`BTC-USD`, `ETH-USD`, `PAXG-USD`), nên mỗi cặp giữ đúng thứ tự trong 1 partition.
+- `PAXG-USD` là token 1 ounce vàng trên Coinbase, dùng làm giá vàng (24/7, không cần key). Giao dịch thưa
+  (vài lệnh mỗi phút), nên nến 1 phút có chỗ trống và `news_reaction` có thể ra NULL cho vàng.
 - Giữ 7 ngày hoặc tối đa 2GB.
 - Value (JSON): `source, symbol, price, size, side, trade_id, event_time, ingest_time`.
   `price`/`size` là chuỗi thập phân để không mất độ chính xác.
@@ -127,21 +129,47 @@ docker exec -it clickhouse sh -c 'clickhouse-client -u pipeline --password "$CLI
 # SELECT * FROM market.news_reaction WHERE symbol = 'BTC-USD' ORDER BY published_at DESC LIMIT 10;
 ```
 
+## Cảnh báo Telegram (giai đoạn 5)
+`alerter` gửi qua bot riêng cho cảnh báo (tách khỏi bot Vietlott). Token và chat id nằm trong `.env.alerter` trên Oracle
+(`TG_TOKEN`, `TG_CHAT_ID`, quyền 600) qua `env_file`, không nằm trong repo, `deploy.sh` không ghi đè, và không bao giờ được log (lỗi HTTP đã bỏ URL chứa token).
+
+| Loại | Khi nào | Kèm theo |
+|---|---|---|
+| Tin | bản ghi `news.enriched` liên quan, `impact >= ALERT_MIN_IMPACT` (mặc định 3, khoảng 1-2 tin/giờ) | giá BTC/ETH hiện tại và % thay đổi 1 giờ |
+| Giá | mỗi phút: giá đóng cửa đổi `>= PRICE_MOVE_PCT` (1,5%) trong `PRICE_WINDOW` (15 phút) | tối đa 3 tin liên quan trong 1 giờ trước đó |
+
+- Tin cũ hơn `ALERT_MAX_AGE` (6 giờ) thì bỏ, nên lần đầu chạy (consumer group `alerter` đọc từ đầu topic) không báo lại tồn đọng.
+- Không báo trùng: key `alert:news:<id>` trong Redis dùng chung, giữ 7 ngày. Cảnh báo giá mỗi cặp nghỉ `PRICE_COOLDOWN` (1 giờ),
+  nhớ trong RAM nên khởi động lại có thể báo lại 1 lần.
+- Tối đa `ALERT_MAX_PER_HOUR` (10) tin nhắn mỗi giờ; vượt thì bỏ và log cảnh báo.
+- Telegram tạm lỗi (mạng, 5xx, 429) thì consumer chờ rồi gửi lại; Telegram từ chối (sai chat, bị chặn) thì bỏ tin đó.
+- Ngưỡng 1,5%/15 phút xấp xỉ phân vị 99 của BTC trong dữ liệu ngày đầu; đổi trong `docker-compose.yml` rồi `./deploy.sh alerter`.
+- Giờ hiển thị theo `ALERT_UTC_OFFSET` (7 = giờ Việt Nam).
+- Đọc ClickHouse bằng user chỉ đọc `grafana`.
+
+```bash
+docker logs -f alerter     # news alert sent / price alert sent
+```
+
 ## Cấu trúc
 ```
 cmd/price-producer/          giá coin
 cmd/news-producer/           tin tức: tạo poller cho GDELT và từng feed RSS
 cmd/nlp-worker/              gán nhãn tin bằng Ollama
+cmd/alerter/                 cảnh báo Telegram: tin impact cao, giá biến động mạnh
 internal/domain/             Tick, NewsItem, NewsAnalysis/EnrichedNews, NewsID/CanonicalURL
 internal/gateway/coinbase/   WebSocket Coinbase, read timeout 30s
 internal/gateway/gdelt/      GDELT DOC 2.0 (artlist JSON)
 internal/gateway/rss/        RSS 2.0 + Atom, bỏ thẻ HTML, conditional GET
 internal/gateway/ollama/     /api/chat với JSON schema, chuẩn hoá nhãn
+internal/gateway/telegram/   sendMessage, lỗi không chứa token
+internal/gateway/clickhouse/ HTTP interface, query có tham số, đọc biến động giá và tin gần đây
 internal/consumer/kafka/     consumer group, xử lý từng bản ghi, commit sau khi xong, thử lại có backoff
 internal/publisher/kafka/    franz-go, idempotent, gom lô 50ms, nén zstd, dùng chung mọi topic
 internal/service/ingest/     giá: tự kết nối lại, backoff 1s → 30s
 internal/service/news/       tin: poller song song, lọc trùng, bỏ bài quá cũ
 internal/service/enrich/     gán nhãn 1 tin, phân biệt lỗi tạm thời và lỗi vĩnh viễn
+internal/service/alert/      chọn tin/biến động cần báo, chống trùng và spam, soạn tin nhắn
 clickhouse/schema/           bảng, Kafka engine, materialized view, view phân tích
 clickhouse/config.d|users.d/ cấu hình RAM/log, user chỉ đọc cho Grafana
 grafana/                     datasource, dashboard (sinh bằng gen_dashboard.py)

@@ -54,7 +54,7 @@ def stat(title, sql, x, unit="none", decimals=0, desc=""):
 
 # ── Hàng 1: tình trạng pipeline ──
 stat("BTC-USD", "SELECT close FROM market.candles_1m WHERE symbol = 'BTC-USD' AND minute >= now() - INTERVAL 10 MINUTE ORDER BY minute DESC LIMIT 1", 0, "currencyUSD", 2)
-stat("ETH-USD", "SELECT close FROM market.candles_1m WHERE symbol = 'ETH-USD' AND minute >= now() - INTERVAL 10 MINUTE ORDER BY minute DESC LIMIT 1", 4, "currencyUSD", 2)
+stat("Vàng (PAXG-USD)", "SELECT close FROM market.candles_1m WHERE symbol = 'PAXG-USD' AND minute >= now() - INTERVAL 10 MINUTE ORDER BY minute DESC LIMIT 1", 4, "currencyUSD", 2)
 stat("Tick 5 phút qua", "SELECT count() FROM market.prices_tick WHERE event_time >= now() - INTERVAL 5 MINUTE", 8,
      desc="0 nghĩa là price-producer hoặc Kafka engine đang dừng.")
 stat("Tin mới 1 giờ qua", "SELECT uniqExact(id) FROM market.news WHERE ingest_time >= now() - INTERVAL 1 HOUR", 12)
@@ -63,18 +63,35 @@ stat("Chờ gán nhãn", "SELECT (SELECT uniqExact(id) FROM market.news) - (SELE
      desc="Số tin có trong news.raw nhưng chưa có trong news.enriched (nlp-worker xử lý khoảng 12 giây/tin).")
 
 # ── Hàng 2: giá, đánh dấu tin impact >= 2 ──
-for i, sym in enumerate(["BTC-USD", "ETH-USD"]):
-    panel(
-        "timeseries", f"{sym}: giá đóng cửa 1 phút",
-        f"""SELECT minute AS time, close AS "{sym}"
+panel(
+    "timeseries", "$symbol: giá đóng cửa 1 phút",
+    """SELECT minute AS time, close AS "$symbol"
 FROM market.candles_1m
-WHERE symbol = '{sym}' AND $__timeFilter(minute)
+WHERE symbol = '$symbol' AND $__timeFilter(minute)
 ORDER BY time""",
-        12 * i, 4, 12, 9, fmt=TIMESERIES,
-        desc="Đường dọc là tin có impact >= 2 (bật/tắt ở mục Annotations phía trên).",
-        field={"unit": "currencyUSD", "decimals": 2, "custom": {"lineWidth": 1, "fillOpacity": 0, "showPoints": "never"}},
-        options={"legend": {"showLegend": False}, "tooltip": {"mode": "single"}},
-    )
+    0, 4, 12, 9, fmt=TIMESERIES,
+    desc="Đổi cặp ở biến 'Cặp' phía trên. Đường dọc là tin có impact >= 2 (bật/tắt ở mục Annotations).",
+    field={"unit": "currencyUSD", "decimals": 2, "custom": {"lineWidth": 1, "fillOpacity": 0, "showPoints": "never"}},
+    options={"legend": {"showLegend": False}, "tooltip": {"mode": "single"}},
+)
+panel(
+    "timeseries", "% thay đổi từ đầu khoảng thời gian, mọi tài sản",
+    """SELECT time, symbol, (close / first_value(close) OVER (PARTITION BY symbol ORDER BY time) - 1) * 100 AS pct
+FROM
+(
+    SELECT toStartOfInterval(minute, INTERVAL greatest(1, intDiv(dateDiff('minute', $__fromTime, $__toTime), 600)) MINUTE) AS time,
+           symbol, argMax(close, minute) AS close
+    FROM market.candles_1m
+    WHERE $__timeFilter(minute)
+    GROUP BY symbol, time
+)
+ORDER BY time""",
+    12, 4, 12, 9, fmt=TIMESERIES,
+    desc="Cùng một thang % để so coin với vàng (PAXG = token 1 ounce vàng). Gộp tối đa khoảng 600 điểm mỗi đường.",
+    field={"unit": "percent", "decimals": 2, "displayName": "${__field.labels.symbol}",
+           "custom": {"lineWidth": 1, "fillOpacity": 0, "showPoints": "never"}},
+    options={"legend": {"showLegend": True, "displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+)
 
 # ── Hàng 3: dòng tin ──
 panel(
@@ -230,10 +247,11 @@ dashboard = {
     "refresh": "1m",
     "time": {"from": "now-24h", "to": "now"},
     "templating": {"list": [{
-        "name": "symbol", "label": "Cặp", "type": "custom",
-        "query": "BTC-USD,ETH-USD",
+        "name": "symbol", "label": "Cặp", "type": "query", "datasource": DS,
+        "query": "SELECT DISTINCT symbol FROM market.prices_1m ORDER BY symbol",
+        "definition": "SELECT DISTINCT symbol FROM market.prices_1m ORDER BY symbol",
+        "refresh": 1,  # lấy lại danh sách khi mở dashboard: thêm cặp mới không cần sửa file này
         "current": {"text": "BTC-USD", "value": "BTC-USD"},
-        "options": [{"text": s, "value": s, "selected": s == "BTC-USD"} for s in ["BTC-USD", "ETH-USD"]],
     }]},
     "annotations": {"list": [
         {"builtIn": 1, "datasource": {"type": "grafana", "uid": "-- Grafana --"}, "enable": True, "hide": True,

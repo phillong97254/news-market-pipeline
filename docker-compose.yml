@@ -1,5 +1,6 @@
 # Redpanda (Kafka API) + Console + producer giá coin (giai đoạn 1) + producer tin tức (giai đoạn 2)
-# + NLP worker gán nhãn tin bằng Ollama (giai đoạn 3) + ClickHouse và Grafana (giai đoạn 4).
+# + NLP worker gán nhãn tin bằng Ollama (giai đoạn 3) + ClickHouse và Grafana (giai đoạn 4)
+# + cảnh báo Telegram (giai đoạn 5).
 # Mọi cổng chỉ mở trên 127.0.0.1 của Oracle; xem từ Kali qua SSH tunnel (README).
 name: news-market
 
@@ -81,7 +82,7 @@ services:
     environment:
       KAFKA_BROKERS: redpanda:9092
       PRICE_TOPIC: prices.tick
-      PRODUCTS: BTC-USD,ETH-USD
+      PRODUCTS: BTC-USD,ETH-USD,PAXG-USD # PAXG: token 1 ounce vàng, đại diện giá vàng (giao dịch 24/7)
     networks: [pipeline]
 
   news-producer:
@@ -203,6 +204,39 @@ services:
     ports:
       - "127.0.0.1:3000:3000"
     networks: [pipeline]
+
+  # Giai đoạn 5: cảnh báo Telegram. Mạng host để tới Kafka (localhost:19092), ClickHouse (127.0.0.1:8123)
+  # và Redis dùng chung (127.0.0.1:6379). Token bot nằm trong .env.alerter trên Oracle, không có trong repo.
+  alerter:
+    build:
+      context: .
+      args:
+        APP: alerter
+    container_name: alerter
+    restart: unless-stopped
+    network_mode: host
+    depends_on:
+      clickhouse-schema:
+        condition: service_completed_successfully
+    environment:
+      KAFKA_BROKERS: localhost:19092
+      IN_TOPIC: news.enriched
+      GROUP: alerter
+      CLICKHOUSE_URL: http://127.0.0.1:8123
+      CLICKHOUSE_USER: grafana
+      CH_GRAFANA_PASSWORD: ${CH_GRAFANA_PASSWORD:?thiếu CH_GRAFANA_PASSWORD trong .env}
+      REDIS_ADDR: 127.0.0.1:6379 # key alert:news:<id>, giữ 7 ngày
+      ALERT_MIN_IMPACT: "3"
+      ALERT_MAX_PER_HOUR: "10"
+      PRICE_WINDOW: 15m
+      PRICE_MOVE_PCT: "1.5"
+      PRICE_COOLDOWN: 1h
+      ALERT_UTC_OFFSET: "7"
+    env_file:
+      - path: ../infra/redis/.env # REDIS_PASSWORD
+        required: false
+      - path: .env.alerter # TG_TOKEN (bot riêng cho cảnh báo), TG_CHAT_ID; chỉ có trên Oracle, quyền 600
+        required: true
 
 volumes:
   redpanda-data:
