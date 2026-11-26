@@ -13,5 +13,6 @@ datasources:
       secure: false
       username: grafana
       defaultDatabase: market
+      queryTimeout: "60" # giây; ClickHouse chặn trần 300 cho user grafana
     secureJsonData:
       password: $CH_GRAFANA_PASSWORD

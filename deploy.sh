@@ -5,6 +5,8 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 REMOTE_DIR=news-market-pipeline
-rsync -az --delete --exclude-from=.rsync-exclude ./ "oracle:~/$REMOTE_DIR/"
+# --inplace: ghi đè lên file cũ (giữ inode). docker-compose mount từng file cấu hình ClickHouse vào container;
+# rsync mặc định tạo file mới rồi đổi tên, khi đó container vẫn thấy bản cũ cho tới khi tạo lại container.
+rsync -az --inplace --delete --exclude-from=.rsync-exclude ./ "oracle:~/$REMOTE_DIR/"
 ssh oracle "cd ~/$REMOTE_DIR && docker compose up -d --build $*"
 ssh oracle "cd ~/$REMOTE_DIR && docker compose ps"

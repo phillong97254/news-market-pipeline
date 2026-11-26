@@ -5,6 +5,13 @@
             <readonly>2</readonly> <!-- chỉ đọc, nhưng plugin Grafana được đặt setting cho từng query -->
             <max_execution_time>30</max_execution_time>
             <max_memory_usage>1000000000</max_memory_usage>
+            <!-- readonly=2 cho phép query tự đặt setting: chặn trần để không nâng giới hạn tài nguyên. -->
+            <constraints>
+                <max_execution_time><max>300</max></max_execution_time> <!-- plugin Grafana tự gửi theo queryTimeout -->
+                <max_memory_usage><max>1000000000</max></max_memory_usage>
+                <max_threads><max>4</max></max_threads>
+                <readonly><const/></readonly>
+            </constraints>
         </grafana_readonly>
     </profiles>
     <users>

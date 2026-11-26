@@ -224,3 +224,21 @@ func TestFormatPrice2(t *testing.T) {
 		}
 	}
 }
+
+func TestSafeURL(t *testing.T) {
+	for in, want := range map[string]string{
+		"https://x.com/a?b=1":   "https://x.com/a?b=1",
+		"http://x.com":          "http://x.com",
+		"javascript:alert(1)":   "",
+		"tg://resolve?domain=x": "",
+		"//evil.com/x":          "",
+		"":                      "",
+	} {
+		if got := safeURL(in); got != want {
+			t.Errorf("safeURL(%q) = %q, want %q", in, got, want)
+		}
+	}
+	if got := linkOrText("javascript:alert(1)", "<b>x</b>"); got != "&lt;b&gt;x&lt;/b&gt;" {
+		t.Errorf("linkOrText = %q", got)
+	}
+}

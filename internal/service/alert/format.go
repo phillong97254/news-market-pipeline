@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"html"
 	"math"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -15,6 +16,15 @@ import (
 const disclaimer = "<i>Chỉ là trùng thời gian, không phải nguyên nhân hay khuyến nghị đầu tư.</i>"
 
 func escape(s string) string { return html.EscapeString(s) }
+
+// safeURL chỉ cho link http(s) vào thẻ <a>: URL đến từ RSS/GDELT (bên ngoài), không tin được.
+func safeURL(raw string) string {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return ""
+	}
+	return u.String()
+}
 
 func formatNews(n domain.EnrichedNews, prices []clickhouse.PriceChange, loc *time.Location) string {
 	var b strings.Builder
@@ -39,8 +49,8 @@ func formatNews(n domain.EnrichedNews, prices []clickhouse.PriceChange, loc *tim
 	for _, p := range prices {
 		fmt.Fprintf(&b, "%s %s (1h %+.2f%%)\n", html.EscapeString(p.Symbol), formatPrice2(p.ToPrice), p.Pct())
 	}
-	if n.URL != "" {
-		fmt.Fprintf(&b, "<a href=\"%s\">Mở bài</a>", html.EscapeString(n.URL))
+	if u := safeURL(n.URL); u != "" {
+		fmt.Fprintf(&b, "<a href=\"%s\">Mở bài</a>", html.EscapeString(u))
 	}
 	return strings.TrimRight(b.String(), "\n")
 }
@@ -59,12 +69,20 @@ func formatPrice(c clickhouse.PriceChange, window, lookback time.Duration, news 
 	} else {
 		fmt.Fprintf(&b, "Tin liên quan trong %s trước đó:\n", minutes(lookback))
 		for _, n := range news {
-			fmt.Fprintf(&b, "• [%d] <a href=\"%s\">%s</a> (%s, %+.2f, %s)\n", n.Impact, html.EscapeString(n.URL),
-				html.EscapeString(n.Title), html.EscapeString(n.Category), n.Sentiment, n.PublishedAt.In(loc).Format("15:04"))
+			fmt.Fprintf(&b, "• [%d] %s (%s, %+.2f, %s)\n", n.Impact, linkOrText(n.URL, n.Title),
+				html.EscapeString(n.Category), n.Sentiment, n.PublishedAt.In(loc).Format("15:04"))
 		}
 	}
 	b.WriteString(disclaimer)
 	return b.String()
+}
+
+// linkOrText: <a> nếu URL hợp lệ, không thì chỉ tiêu đề.
+func linkOrText(rawURL, title string) string {
+	if u := safeURL(rawURL); u != "" {
+		return fmt.Sprintf("<a href=\"%s\">%s</a>", html.EscapeString(u), html.EscapeString(title))
+	}
+	return html.EscapeString(title)
 }
 
 func sentimentIcon(s float64) string {

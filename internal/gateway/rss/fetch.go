@@ -87,7 +87,7 @@ func (i *impl) parse(feed Feed, body []byte) ([]domain.NewsItem, error) {
 	add := func(title, link, summary, date, lang string) {
 		title = cleanText(title)
 		link = strings.TrimSpace(link)
-		if title == "" || !strings.HasPrefix(link, "http") {
+		if title == "" || !(strings.HasPrefix(link, "http://") || strings.HasPrefix(link, "https://")) {
 			return
 		}
 		it := base
@@ -103,7 +103,7 @@ func (i *impl) parse(feed Feed, body []byte) ([]domain.NewsItem, error) {
 
 	for _, it := range doc.Channel.Items {
 		link := it.Link
-		if link == "" && strings.HasPrefix(it.GUID, "http") {
+		if link == "" && (strings.HasPrefix(it.GUID, "http://") || strings.HasPrefix(it.GUID, "https://")) {
 			link = it.GUID
 		}
 		date := it.PubDate

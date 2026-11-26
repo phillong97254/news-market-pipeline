@@ -87,7 +87,7 @@ func (i *impl) buildDigest(ctx context.Context, from, to time.Time) string {
 	} else if len(news) > 0 {
 		b.WriteString("\n<b>Tin đáng chú ý</b>\n")
 		for _, n := range news {
-			fmt.Fprintf(&b, "• [%d] <a href=\"%s\">%s</a> (%s, %+.2f)\n", n.Impact, escape(n.URL), escape(n.Title), escape(n.Category), n.Sentiment)
+			fmt.Fprintf(&b, "• [%d] %s (%s, %+.2f)\n", n.Impact, linkOrText(n.URL, n.Title), escape(n.Category), n.Sentiment)
 		}
 	}
 
