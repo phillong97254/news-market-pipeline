@@ -1,0 +1,135 @@
+# Redpanda (Kafka API) + Console + producer giá coin (giai đoạn 1) + producer tin tức (giai đoạn 2)
+# + NLP worker gán nhãn tin bằng Ollama (giai đoạn 3).
+# Mọi cổng chỉ mở trên 127.0.0.1 của Oracle; xem từ Kali qua SSH tunnel (README).
+name: news-market
+
+services:
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:v24.2.7
+    container_name: redpanda
+    restart: unless-stopped
+    command:
+      - redpanda
+      - start
+      - --mode=dev-container # 1 node, bỏ kiểm tra phần cứng, phù hợp máy đơn
+      - --smp=1
+      - --memory=1536M
+      - --reserve-memory=0M
+      - --kafka-addr=internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr=internal://redpanda:9092,external://localhost:19092
+      - --schema-registry-addr=internal://0.0.0.0:8081
+      - --rpc-addr=redpanda:33145
+      - --advertise-rpc-addr=redpanda:33145
+    ports:
+      - "127.0.0.1:19092:19092" # Kafka cho công cụ chạy trên host / qua tunnel
+    volumes:
+      - redpanda-data:/var/lib/redpanda/data
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -E 'Healthy:.+true'"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [pipeline]
+
+  # Tạo topic một lần rồi thoát (chạy lại không sao, topic đã có thì bỏ qua).
+  topics:
+    image: docker.redpanda.com/redpandadata/redpanda:v24.2.7
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        rpk -X brokers=redpanda:9092 topic create prices.tick -p 3 -r 1 \
+          -c retention.ms=604800000 -c retention.bytes=2147483648 -c compression.type=producer \
+          || true
+        rpk -X brokers=redpanda:9092 topic create news.raw -p 3 -r 1 \
+          -c retention.ms=2592000000 -c compression.type=producer \
+          || true
+        rpk -X brokers=redpanda:9092 topic create news.enriched -p 3 -r 1 \
+          -c retention.ms=7776000000 -c compression.type=producer \
+          || true
+        rpk -X brokers=redpanda:9092 topic list
+    restart: "no"
+    networks: [pipeline]
+
+  console:
+    image: docker.redpanda.com/redpandadata/console:v2.7.2
+    container_name: redpanda-console
+    restart: unless-stopped
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKERS: redpanda:9092
+      KAFKA_SCHEMAREGISTRY_ENABLED: "true"
+      KAFKA_SCHEMAREGISTRY_URLS: http://redpanda:8081
+    ports:
+      - "127.0.0.1:8090:8080" # 8080 đã bị backoffice dùng
+    networks: [pipeline]
+
+  price-producer:
+    build:
+      context: .
+      args:
+        APP: price-producer
+    container_name: price-producer
+    restart: unless-stopped
+    depends_on:
+      topics:
+        condition: service_completed_successfully
+    environment:
+      KAFKA_BROKERS: redpanda:9092
+      PRICE_TOPIC: prices.tick
+      PRODUCTS: BTC-USD,ETH-USD
+    networks: [pipeline]
+
+  news-producer:
+    build:
+      context: .
+      args:
+        APP: news-producer
+    container_name: news-producer
+    restart: unless-stopped
+    depends_on:
+      topics:
+        condition: service_completed_successfully
+    environment:
+      KAFKA_BROKERS: redpanda:9092
+      NEWS_TOPIC: news.raw
+      GDELT_EVERY: 15m
+      RSS_EVERY: 10m
+    networks: [pipeline]
+
+  # Dùng mạng của host để gọi Ollama ở 127.0.0.1:11434 (Ollama không mở ra ngoài) và Kafka ở localhost:19092.
+  # Container này không mở cổng nào.
+  nlp-worker:
+    build:
+      context: .
+      args:
+        APP: nlp-worker
+    container_name: nlp-worker
+    restart: unless-stopped
+    network_mode: host
+    depends_on:
+      topics:
+        condition: service_completed_successfully
+    environment:
+      KAFKA_BROKERS: localhost:19092
+      IN_TOPIC: news.raw
+      OUT_TOPIC: news.enriched
+      GROUP: nlp-worker
+      OLLAMA_URL: http://127.0.0.1:11434
+      OLLAMA_MODEL: qwen2.5:7b
+      REDIS_ADDR: 127.0.0.1:6379 # Redis dùng chung (~/infra/redis), key có prefix nlp:done:
+    # Lấy REDIS_PASSWORD từ file của Redis dùng chung trên Oracle, không chép mật khẩu vào repo.
+    env_file:
+      - path: ../infra/redis/.env
+        required: false
+
+volumes:
+  redpanda-data:
+
+networks:
+  pipeline:
+    name: pipeline

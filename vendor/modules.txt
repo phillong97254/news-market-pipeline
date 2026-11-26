@@ -1,0 +1,58 @@
+# github.com/cespare/xxhash/v2 v2.2.0
+## explicit; go 1.11
+github.com/cespare/xxhash/v2
+# github.com/coder/websocket v1.8.15
+## explicit; go 1.23
+github.com/coder/websocket
+github.com/coder/websocket/internal/bpool
+github.com/coder/websocket/internal/errd
+github.com/coder/websocket/internal/util
+github.com/coder/websocket/internal/wsjs
+# github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f
+## explicit
+github.com/dgryski/go-rendezvous
+# github.com/klauspost/compress v1.20.3
+## explicit; go 1.25
+github.com/klauspost/compress
+github.com/klauspost/compress/flate
+github.com/klauspost/compress/fse
+github.com/klauspost/compress/gzip
+github.com/klauspost/compress/huff0
+github.com/klauspost/compress/internal/cpuinfo
+github.com/klauspost/compress/internal/le
+github.com/klauspost/compress/internal/race
+github.com/klauspost/compress/internal/regmask
+github.com/klauspost/compress/internal/snapref
+github.com/klauspost/compress/s2
+github.com/klauspost/compress/zstd
+github.com/klauspost/compress/zstd/internal/xxhash
+# github.com/pierrec/lz4/v4 v4.1.33
+## explicit; go 1.22
+github.com/pierrec/lz4/v4
+github.com/pierrec/lz4/v4/internal/lz4block
+github.com/pierrec/lz4/v4/internal/lz4errors
+github.com/pierrec/lz4/v4/internal/lz4stream
+github.com/pierrec/lz4/v4/internal/xxh32
+# github.com/redis/go-redis/v9 v9.7.3
+## explicit; go 1.18
+github.com/redis/go-redis/v9
+github.com/redis/go-redis/v9/internal
+github.com/redis/go-redis/v9/internal/hashtag
+github.com/redis/go-redis/v9/internal/hscan
+github.com/redis/go-redis/v9/internal/pool
+github.com/redis/go-redis/v9/internal/proto
+github.com/redis/go-redis/v9/internal/rand
+github.com/redis/go-redis/v9/internal/util
+# github.com/twmb/franz-go v1.22.3
+## explicit; go 1.26.0
+github.com/twmb/franz-go/pkg/kbin
+github.com/twmb/franz-go/pkg/kerr
+github.com/twmb/franz-go/pkg/kgo
+github.com/twmb/franz-go/pkg/kgo/internal/sticky
+github.com/twmb/franz-go/pkg/kgo/internal/xsync
+github.com/twmb/franz-go/pkg/kversion
+github.com/twmb/franz-go/pkg/sasl
+# github.com/twmb/franz-go/pkg/kmsg v1.15.1
+## explicit; go 1.26.0
+github.com/twmb/franz-go/pkg/kmsg
+github.com/twmb/franz-go/pkg/kmsg/internal/kbin
