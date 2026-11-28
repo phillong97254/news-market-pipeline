@@ -8,10 +8,12 @@ import (
 	"github.com/phillong97254/news-market-pipeline/internal/gateway/telegram"
 )
 
-// Ngưỡng coi một tầng là tắc. RSS lấy 10 phút/lần nên 45 phút không có tin mới là bất thường.
+// Ngưỡng coi một tầng là tắc.
+// Tin: đêm và sáng sớm các RSS có khi hơn 1 giờ không có bài mới, GDELT lại hay bị 429, nên 45 phút
+// báo nhầm vài lần mỗi ngày. 90 phút vẫn bắt được news-producer chết hoặc mọi nguồn cùng hỏng.
 const (
 	tickStale       = 5 * time.Minute
-	newsStale       = 45 * time.Minute
+	newsStale       = 90 * time.Minute
 	enrichStale     = 30 * time.Minute // còn tin chờ mà nlp-worker không ghi gì
 	backlogMax      = 300              // khoảng 1 giờ làm việc của nlp-worker
 	clickhouseFails = 5                // số phút liên tiếp ClickHouse lỗi

@@ -56,7 +56,7 @@ func TestPollOnce(t *testing.T) {
 	t.Run("gửi bài mới, bỏ bài quá cũ", func(t *testing.T) {
 		pub := &fakePub{}
 		svc := newTestService(pub)
-		if n := svc.pollOnce(context.Background(), fixed(item("a", time.Hour), item("old", 72*time.Hour))); n != 1 {
+		if n, _ := svc.pollOnce(context.Background(), fixed(item("a", time.Hour), item("old", 72*time.Hour))); n != 1 {
 			t.Fatalf("sent = %d, want 1", n)
 		}
 		if len(pub.keys) != 1 || pub.keys[0] != "a" {
@@ -68,7 +68,7 @@ func TestPollOnce(t *testing.T) {
 		pub := &fakePub{}
 		svc := newTestService(pub)
 		svc.pollOnce(context.Background(), fixed(item("a", 0), item("b", 0)))
-		if n := svc.pollOnce(context.Background(), fixed(item("b", 0), item("c", 0))); n != 1 {
+		if n, _ := svc.pollOnce(context.Background(), fixed(item("b", 0), item("c", 0))); n != 1 {
 			t.Fatalf("second poll sent %d, want 1", n)
 		}
 		if want := []string{"a", "b", "c"}; len(pub.keys) != 3 || pub.keys[2] != want[2] {
@@ -89,7 +89,7 @@ func TestPollOnce(t *testing.T) {
 		pub := &fakePub{}
 		svc := newTestService(pub)
 		p := Poller{Name: "x", Fetch: func(context.Context) ([]domain.NewsItem, error) { return nil, errors.New("503") }}
-		if n := svc.pollOnce(context.Background(), p); n != 0 || len(pub.keys) != 0 {
+		if n, _ := svc.pollOnce(context.Background(), p); n != 0 || len(pub.keys) != 0 {
 			t.Fatalf("sent %d", n)
 		}
 	})
@@ -99,10 +99,49 @@ func TestPollOnce(t *testing.T) {
 		svc := newTestService(pub)
 		svc.pollOnce(context.Background(), fixed(item("a", 0)))
 		pub.fail = nil
-		if n := svc.pollOnce(context.Background(), fixed(item("a", 0))); n != 1 {
+		if n, _ := svc.pollOnce(context.Background(), fixed(item("a", 0))); n != 1 {
 			t.Fatalf("retry sent %d, want 1", n)
 		}
 	})
+}
+
+func TestNextWait(t *testing.T) {
+	p := Poller{Every: 15 * time.Minute, Retry: time.Minute}
+	for fails, want := range []time.Duration{15 * time.Minute, time.Minute, 2 * time.Minute, 4 * time.Minute, 8 * time.Minute, 15 * time.Minute, 15 * time.Minute} {
+		if got := nextWait(p, fails); got != want {
+			t.Errorf("fails=%d: got %v, want %v", fails, got, want)
+		}
+	}
+	if got := nextWait(Poller{Every: time.Hour}, 3); got != time.Hour {
+		t.Errorf("no retry: got %v", got)
+	}
+	if got := nextWait(p, 1000); got != 15*time.Minute {
+		t.Errorf("many fails: got %v", got)
+	}
+}
+
+func TestRun_RetriesAfterFailure(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	calls := make(chan struct{}, 10)
+	n := 0
+	p := Poller{Name: "p", Every: time.Hour, Retry: 10 * time.Millisecond, Fetch: func(context.Context) ([]domain.NewsItem, error) {
+		n++
+		calls <- struct{}{}
+		if n == 1 {
+			return nil, errors.New("429")
+		}
+		return nil, nil
+	}}
+	svc := New(slog.New(slog.NewTextHandler(io.Discard, nil)), &fakePub{}, "news.raw", []Poller{p})
+	go func() { _ = svc.Run(ctx) }()
+	for k := 0; k < 2; k++ {
+		select {
+		case <-calls:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("call %d did not happen: failed poll was not retried early", k+1)
+		}
+	}
 }
 
 func TestSeenSet_Prune(t *testing.T) {

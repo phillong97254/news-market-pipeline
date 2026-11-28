@@ -54,6 +54,24 @@ func TestCheckHealth_RaiseRemindResolve(t *testing.T) {
 	}
 }
 
+func TestCheckHealth_NewsQuietIsNotAnIssue(t *testing.T) {
+	tg := &fakeTG{}
+	ch := &fakeCH{health: healthy()}
+	s, _ := newSvc(tg, ch, Config{})
+	ctx := context.Background()
+
+	// Đêm vắng tin 1 giờ: không báo.
+	ch.health.LastNews = now.Add(-time.Hour)
+	if err := s.CheckHealth(ctx); err != nil || len(tg.sent) != 0 {
+		t.Fatalf("1h quiet: err=%v sent=%q", err, tg.sent)
+	}
+	// Quá 90 phút: báo.
+	ch.health.LastNews = now.Add(-100 * time.Minute)
+	if err := s.CheckHealth(ctx); err != nil || len(tg.sent) != 1 || !strings.Contains(tg.sent[0], "Không có tin mới trong 1h40m0s") {
+		t.Fatalf("100m quiet: err=%v sent=%q", err, tg.sent)
+	}
+}
+
 func TestCheckHealth_ClickHouseDown(t *testing.T) {
 	tg := &fakeTG{}
 	ch := &fakeCH{healthErr: errors.New("connection refused")}

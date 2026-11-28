@@ -57,7 +57,7 @@ docker logs -f news-producer                               # mỗi lần lấy: 
 
 | Nguồn | Chu kỳ | Ghi chú |
 |---|---|---|
-| GDELT DOC API | 15 phút, nhìn lại 1 giờ | Giới hạn 1 request/5 giây, bị 429 thì đợi lần sau. Bắt tay TLS chậm (~10s) |
+| GDELT DOC API | 15 phút, nhìn lại 3 giờ | Giới hạn 1 request/5 giây; IP Oracle hay bị 429, khi đó thử lại sau 1, 2, 4, 8 phút. Bắt tay TLS chậm (~10s) |
 | BBC World, BBC Business | 10 phút | Điều khoản dùng lại metadata/RSS của BBC |
 | CoinDesk | 10 phút | |
 | VnExpress Thế giới, Kinh doanh | 10 phút | Feed không ghi ngôn ngữ; đôi lúc trả 503 |
@@ -149,7 +149,7 @@ docker exec -it clickhouse sh -c 'clickhouse-client -u pipeline --password "$CLI
 - Đọc ClickHouse bằng user chỉ đọc `grafana`.
 
 Ngoài 2 loại trên, alerter còn:
-- **Theo dõi pipeline** mỗi phút, báo ⚠️ khi: không có tick mới 5 phút; không có tin mới 45 phút; còn tin chờ mà nlp-worker
+- **Theo dõi pipeline** mỗi phút, báo ⚠️ khi: không có tick mới 5 phút; không có tin mới 90 phút; còn tin chờ mà nlp-worker
   không gán nhãn gì 30 phút (hoặc tồn hơn 300 tin); ClickHouse lỗi 5 phút liền. Báo ✅ khi chạy lại, nhắc lại sau 6 giờ nếu
   vẫn lỗi. Tin này không tính vào hạn mức mỗi giờ.
 - **Tóm tắt 24 giờ** lúc `DIGEST_AT` (21:00 giờ Việt Nam, `off` để tắt): giá đầu/cuối, cao/thấp của mỗi cặp; số tin, tin liên quan,

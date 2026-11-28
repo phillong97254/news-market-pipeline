@@ -17,5 +17,7 @@ type Service interface {
 type Poller struct {
 	Name  string
 	Every time.Duration
+	// Retry > 0: lấy lỗi thì thử lại sau Retry, 2*Retry, 4*Retry... (không quá Every) thay vì chờ hết Every.
+	Retry time.Duration
 	Fetch func(ctx context.Context) ([]domain.NewsItem, error)
 }

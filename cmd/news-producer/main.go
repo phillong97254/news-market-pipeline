@@ -50,10 +50,13 @@ func main() {
 
 	if q := env("GDELT_QUERY", defaultGDELTQuery); q != "off" {
 		g := gdelt.New(os.Getenv("GDELT_URL"), ua)
-		input := gdelt.SearchInput{Query: q, Timespan: time.Hour, Max: 250}
+		// GDELT hay trả 429 cho IP của Oracle: thử lại sau 1, 2, 4, 8 phút, và mỗi lần lấy nhìn lại 3 giờ
+		// để một lần thành công bù được các lần bị chặn trước đó (bài trùng bị bỏ theo ID).
+		input := gdelt.SearchInput{Query: q, Timespan: 3 * time.Hour, Max: 250}
 		pollers = append(pollers, news.Poller{
 			Name:  "gdelt",
 			Every: duration("GDELT_EVERY", 15*time.Minute),
+			Retry: time.Minute,
 			Fetch: func(ctx context.Context) ([]domain.NewsItem, error) { return g.SearchArticles(ctx, input) },
 		})
 	}
